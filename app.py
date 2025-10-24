@@ -134,20 +134,23 @@ class MiniPy(QMainWindow):
         save_btn = QPushButton("Save", self)
         run_btn = QPushButton("Run ▶", self)
         clear_btn = QPushButton("Clear REPL", self)
+        exit_btn = QPushButton("Exit", self)
 
-        for b in (open_btn, save_btn, run_btn, clear_btn):
+        for b in (open_btn, save_btn, run_btn, clear_btn, exit_btn):
             b.setCursor(Qt.PointingHandCursor)
 
         open_btn.clicked.connect(self.open_file)
         save_btn.clicked.connect(self.save_file)
         run_btn.clicked.connect(self.run_current)
         clear_btn.clicked.connect(self._clear_repl)
+        exit_btn.clicked.connect(QApplication.quit)
 
         h = QHBoxLayout()
         h.addWidget(open_btn)
         h.addWidget(save_btn)
         h.addWidget(run_btn)
         h.addWidget(clear_btn)
+        h.addWidget(exit_btn)
         h.addStretch(1)
         return h
 
@@ -284,7 +287,11 @@ class MiniPy(QMainWindow):
         act_clear.setShortcut(QKeySequence("Ctrl+L"))
         act_clear.triggered.connect(self._clear_repl)
 
-        for act in (act_open, act_save, act_run, act_clear):
+        act_exit = QAction("Exit", self)
+        act_exit.setShortcut(QKeySequence("Ctrl+Q"))
+        act_exit.triggered.connect(QApplication.quit)
+
+        for act in (act_open, act_save, act_run, act_clear, act_exit):
             # QAction-ების დამატება QMainWindow-ზე → იმუშავებს აქტიური focus-ის მიუხედავად
             self.addAction(act)
 

@@ -37,3 +37,28 @@
 ```bash
 sudo pacman -S python-pip python-jupyter_client python-ipykernel qt6-base
 pip install --user PySide6 qtconsole
+```
+## 📦 პაკეტები და ინსტალაცია
+ყველა გარე მოდული დაყენდეს სისტემურ Python-ში:
+
+```bash
+# 🔹 Manjaro / Linux
+
+# აუცილებელი ძირითადი პაკეტები
+```bash 
+sudo pacman -Syu python-ipykernel python-jupyter_client python-qtconsole
+```
+# PySide6 არის AUR პაკეტი — დააყენე yay-ის მეშვეობით
+```bash
+sudo pacman -S base-devel git yay   # თუ ჯერ არ გაქვს
+yay -S pyside6
+```
+# შემოწმება
+```bash
+python3 -c "import PySide6, qtconsole, jupyter_client, ipykernel; print('OK')"
+```
+# Windows
+```powershell
+
+py -m pip install PySide6 ipykernel jupyter_client
+```
