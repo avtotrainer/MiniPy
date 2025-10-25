@@ -6,44 +6,34 @@ UI: ზედა რედაქტორი (QPlainTextEdit) + ქვედა 
 ღილაკები: Open, Save, Run, Clear
 Shortcut-ები: Ctrl+O, Ctrl+S, Ctrl+R, Ctrl+L
 
-ძირითადი პრინციპები (პროექტის ჭეშმარიტებები):
+ძირითადი პრინციპები:
 - PySide6 + qtconsole/IPython (ipykernel ≥ 6, jupyter_client ≥ 7)
 - სისტემური Python 3.12–3.13+ (შიდა venv არ ვიყენებთ)
-- Run ასრულებს მიმდინარე ფაილს REPL-ში `%run -i`-ით (ინტერაქტიური namespace-ის შენარჩუნება)
-- UI განლაგება უცვლელია: ზედა რედაქტორი, ქვედა REPL, ზემოთ ღილაკების ზოლი
+- Run ასრულებს მიმდინარე ფაილს REPL-ში `%run -i`-ით (ინტერაქტიური namespace)
+- UI უცვლელია: ზედა რედაქტორი, ქვედა REPL, ზემოთ ღილაკების ზოლი
 
 პლატფორმა:
 - Manjaro/Linux (Wayland/X11): სჯობს `QT_QPA_PLATFORM=wayland` Wayland სესიაზე.
-- Windows 10/11: მუშაობს სისტემურ Python-თან (python.org installer ან Store-ის გარეშე უკეთესი)
+- Windows 10/11: მუშაობს სისტემურ Python-თან (python.org installer, არა Store)
 
 დამოკიდებულებები:
 Linux (Manjaro):
     sudo pacman -S python-pip python-jupyter_client python-ipykernel qt6-base
     pip install --user PySide6 qtconsole
-Windows 10/11 (PowerShell):
+Windows (PowerShell):
     py -m pip install --upgrade pip
     py -m pip install PySide6 qtconsole jupyter_client ipykernel
-
-გაშვება:
-Linux:
-    python app.py
-Windows:
-    py app.py
-
-შენიშვნები:
-- თუ qtconsole/ipykernel არ არის დაყენებული, პროგრამა გამოიტანს ნათელ შეტყობინებას.
-- Ctrl+L ასუფთავებს მხოლოდ REPL-ს (არ შეეხება რედაქტორს).
 """
 
 from __future__ import annotations
 
 import os
 import sys
+import tempfile
 from pathlib import Path
 from typing import Optional
 
-# QtCore/QtWidgets
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QSaveFile, QFile, QTextStream, QTimer
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
@@ -58,11 +48,11 @@ from PySide6.QtWidgets import (
     QStatusBar,
 )
 
-# qtconsole/Jupyter კომპონენტები (დაინსტალირებული უნდა იყოს იმავე env-ში)
+# qtconsole / IPython
 try:
     from qtconsole.rich_jupyter_widget import RichJupyterWidget
     from qtconsole.manager import QtKernelManager
-except Exception as _e:  # გვინდა მკაფიო შეცდომა GUI-ს გაშვებამდე
+except Exception as _e:
     sys.stderr.write(
         "[MiniPy] qtconsole პაკეტი ვერ ჩაიტვირთა. დააყენეთ:\n"
         "  pip install PySide6 qtconsole jupyter_client ipykernel\n"
@@ -72,28 +62,22 @@ except Exception as _e:  # გვინდა მკაფიო შეცდო
 
 
 class MiniPy(QMainWindow):
-    """
-    MiniPy მთავარი ფანჯარა: რედაქტორი + REPL + ღილაკების ზოლი + shortcut-ები.
-    """
+    """MiniPy მთავარი ფანჯარა: რედაქტორი + REPL + ღილაკების ზოლი + shortcut-ები."""
 
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("MiniPy")
         self.resize(1000, 700)
 
-        # სტატუსბარი — აქ ვაჩვენებთ მოკლე შეტყობინებებს (არჩევითი, მაგრამ სასარგებლო)
+        # სტატუსბარი
         self.setStatusBar(QStatusBar(self))
 
-        # --- რედაქტორი ---
+        # Widgets
         self.editor = self._build_editor()
-
-        # --- REPL (IPython via qtconsole) ---
         self.repl = self._start_repl()
-
-        # --- ღილაკები ---
         bar = self._build_toolbar()
 
-        # --- განლაგება ---
+        # განლაგება
         root = QVBoxLayout()
         root.addLayout(bar)
         root.addWidget(self.editor, 2)
@@ -103,33 +87,22 @@ class MiniPy(QMainWindow):
         container.setLayout(root)
         self.setCentralWidget(container)
 
-        # მიმდინარე ფაილის ბილიკი (None სანამ არაფერი გაგვიღია/შევსუფთავეთ)
+        # მიმდინარე ფაილი
         self.current_path: Optional[Path] = None
 
-        # --- გლობალური Shortcut-ები ---
+        # Shortcut-ები
         self._add_shortcuts()
 
-    # --------------------------------------------------------------------- #
-    # Helper builders
-    # --------------------------------------------------------------------- #
+    # ------------------------------------------------------------------ #
+    # UI helper-ები
+    # ------------------------------------------------------------------ #
     def _build_editor(self) -> QPlainTextEdit:
-        """
-        ქმნის და კონფიგურირებს ტექსტურ რედაქტორს.
-        - Tabs = 4 space
-        - საწყისი placeholder ტექსტი
-        """
         ed = QPlainTextEdit(self)
-        # Tab ზომა (სიმბოლოების სიგანის მიხედვით)
         ed.setTabStopDistance(4 * ed.fontMetrics().horizontalAdvance(" "))
         ed.setPlaceholderText("# აქ ჩაწერე კოდი...\nprint('Hello, MiniPy!')\n")
         return ed
 
     def _build_toolbar(self) -> QHBoxLayout:
-        """
-        ზედა ღილაკების ზოლის შექმნა და სიგნალების მიბმა.
-        ღილაკები:
-            Open, Save, Run ▶, Clear REPL
-        """
         open_btn = QPushButton("Open", self)
         save_btn = QPushButton("Save", self)
         run_btn = QPushButton("Run ▶", self)
@@ -154,41 +127,28 @@ class MiniPy(QMainWindow):
         h.addStretch(1)
         return h
 
-    # --------------------------------------------------------------------- #
+    # ------------------------------------------------------------------ #
     # REPL setup
-    # --------------------------------------------------------------------- #
+    # ------------------------------------------------------------------ #
     def _start_repl(self) -> RichJupyterWidget:
-        """
-        სტარტავს IPython kernel-ს სისტემურ Python-ზე და აბამს qtconsole widget-ს.
-        იყენებს მიმდინარე Python ინტერპრეტატორს (3.12/3.13+).
-        """
-        # KernelManager — kernel_name="python3" გამოიყენებს აქტიურ ინტერპრეტატორს
         km = QtKernelManager(kernel_name="python3")
-
-        # Linux ტერმინალის ფერების პროფილი საკმარისია (პლატფორმა-აგნოსტური)
-        km.start_kernel(extra_arguments=["--colors=Linux"])  # type: ignore[arg-type]
-
+        km.start_kernel(extra_arguments=["--colors=Linux", "--quiet"])
         kc = km.client()
         kc.start_channels()
 
         w = RichJupyterWidget(self)
         w.kernel_manager = km
         w.kernel_client = kc
-
-        # საწყისი ბანერი (ვაჩვენოთ Python ვერსია)
         w.banner = f"MiniPy — Python {sys.version.split()[0]} | Type ? for help"
 
-        # გაშვებისას გავასუფთავოთ ეკრანი
-        w.clear()
         return w
 
-    # --------------------------------------------------------------------- #
-    # File operations
-    # --------------------------------------------------------------------- #
+    # ------------------------------------------------------------------ #
+    # ფაილის ოპერაციები
+    # ------------------------------------------------------------------ #
     def open_file(self) -> None:
-        """
-        გახსნა: აბაზღაურებს რედაქტორში არჩეული .py ფაილის შიგთავსს.
-        """
+        if not self._maybe_save_changes():
+            return
         start_dir = str(self.current_path.parent if self.current_path else Path.cwd())
         path_str, _ = QFileDialog.getOpenFileName(
             self, "Open", start_dir, "Python (*.py)"
@@ -198,7 +158,14 @@ class MiniPy(QMainWindow):
 
         path = Path(path_str)
         try:
-            text = path.read_text(encoding="utf-8")
+            data = path.read_bytes()
+            if data.startswith(b"\xef\xbb\xbf"):
+                text = data[3:].decode("utf-8", errors="replace")
+            else:
+                try:
+                    text = data.decode("utf-8")
+                except UnicodeDecodeError:
+                    text = data.decode("latin-1", errors="replace")
         except Exception as e:
             QMessageBox.critical(self, "Open error", f"{type(e).__name__}: {e}")
             return
@@ -208,10 +175,6 @@ class MiniPy(QMainWindow):
         self.statusBar().showMessage(f"Opened: {self.current_path}", 3000)
 
     def save_file(self) -> None:
-        """
-        შენახვა: ინახავს რედაქტორის ტექსტს self.current_path-ში.
-        თუ გზა ჯერ არ გვაქვს, გვკითხავს სად შევინახოთ.
-        """
         if not self.current_path:
             start_dir = str(Path.cwd())
             path_str, _ = QFileDialog.getSaveFileName(
@@ -224,53 +187,58 @@ class MiniPy(QMainWindow):
             self.current_path = Path(path_str)
 
         try:
-            self.current_path.write_text(self.editor.toPlainText(), encoding="utf-8")
+            sf = QSaveFile(str(self.current_path))
+            if not sf.open(QFile.WriteOnly | QFile.Truncate | QFile.Text):
+                raise OSError("cannot open for writing")
+            ts = QTextStream(sf)
+            ts.setEncoding("UTF-8")
+            ts << self.editor.toPlainText()
+            if not sf.commit():
+                raise OSError("commit failed")
         except Exception as e:
             QMessageBox.critical(self, "Save error", f"{type(e).__name__}: {e}")
             return
 
         self.statusBar().showMessage(f"Saved: {self.current_path}", 3000)
 
-    # --------------------------------------------------------------------- #
-    # Run/Clear actions
-    # --------------------------------------------------------------------- #
+    # ------------------------------------------------------------------ #
+    # Run / Clear
+    # ------------------------------------------------------------------ #
     def run_current(self) -> None:
-        """
-        ასრულებს მიმდინარე ფაილს REPL-ში `%run -i`-ით (ინტერაქტიური namespace-ის შენარჩუნება).
-        """
-        # ფაილის მიღწევადობისა და ცვლილებების დაცვა
+        # თუ ჯერ არ გვაქვს ფაილი — დროებითი გაშვება
         if not self.current_path:
-            self.save_file()
-            if not self.current_path:
-                return
+            fd, tmp_name = tempfile.mkstemp(prefix="minipy_", suffix=".py")
+            os.close(fd)
+            target_path = Path(tmp_name)
+        else:
+            target_path = self.current_path
 
-        # ფაილის ბოლო რედაქტირება შევინახოთ
-        self.save_file()
+        # ყოველთვის ჩავწეროთ მიმდინარე ტექსტი (auto-save ან temp)
+        try:
+            sf = QSaveFile(str(target_path))
+            if not sf.open(QFile.WriteOnly | QFile.Truncate | QFile.Text):
+                raise OSError("cannot open for writing")
+            ts = QTextStream(sf)
+            ts.setEncoding("UTF-8")
+            ts << self.editor.toPlainText()
+            if not sf.commit():
+                raise OSError("commit failed")
+        except Exception as e:
+            QMessageBox.critical(self, "Run error", f"{type(e).__name__}: {e}")
+            return
 
-        # Windows პათების ეսկეიპი — qtconsole-ში სწორი სტრინგის გადასაცემად
-        safe_path = str(self.current_path).replace("\\", "\\\\").replace('"', r"\"")
-
-        # `%run -i` ინარჩუნებს namespace-ს (როგორც პროექტშია მოთხოვნილი)
-        code = f'%run -i "{safe_path}"'
+        code = f"%run -i {repr(str(target_path))}"
         self.repl.execute(code)
-        self.statusBar().showMessage("Ran current script via %run -i", 3000)
+        self.statusBar().showMessage(f"Ran via %run -i: {target_path}", 3000)
 
     def _clear_repl(self) -> None:
-        """გაასუფთავებს REPL კონსოლს."""
         self.repl.clear()
         self.statusBar().showMessage("REPL cleared", 2000)
 
-    # --------------------------------------------------------------------- #
-    # Keyboard shortcuts
-    # --------------------------------------------------------------------- #
+    # ------------------------------------------------------------------ #
+    # Shortcut-ები
+    # ------------------------------------------------------------------ #
     def _add_shortcuts(self) -> None:
-        """
-        ამატებს გლობალურ Shortcut-ებს:
-            Ctrl+O → open_file()
-            Ctrl+S → save_file()
-            Ctrl+R → run_current()
-            Ctrl+L → clear REPL
-        """
         act_open = QAction("Open", self)
         act_open.setShortcut(QKeySequence("Ctrl+O"))
         act_open.triggered.connect(self.open_file)
@@ -292,37 +260,48 @@ class MiniPy(QMainWindow):
         act_exit.triggered.connect(QApplication.quit)
 
         for act in (act_open, act_save, act_run, act_clear, act_exit):
-            # QAction-ების დამატება QMainWindow-ზე → იმუშავებს აქტიური focus-ის მიუხედავად
             self.addAction(act)
 
-    # --------------------------------------------------------------------- #
-    # Lifecycle
-    # --------------------------------------------------------------------- #
+    # ------------------------------------------------------------------ #
+    # Lifecycle / უსაფრთხო დახურვა
+    # ------------------------------------------------------------------ #
     def closeEvent(self, event) -> None:  # type: ignore[override]
-        """
-        ფანჯრის დახურვისას kernel-ის კორექტული დახურვა.
-        """
+        if not self._maybe_save_changes():
+            event.ignore()
+            return
         try:
             if hasattr(self.repl, "kernel_client") and self.repl.kernel_client:
                 self.repl.kernel_client.stop_channels()
             if hasattr(self.repl, "kernel_manager") and self.repl.kernel_manager:
                 self.repl.kernel_manager.shutdown_kernel(now=True)
         except Exception:
-            # ჩუმად გავატაროთ, რომ დახურვა არ გადაიშალოს მცირე შეცდომით
             pass
         super().closeEvent(event)
 
+    # ------------------------------------------------------------------ #
+    # Unsaved changes guard
+    # ------------------------------------------------------------------ #
+    def _maybe_save_changes(self) -> bool:
+        doc = self.editor.document()
+        if not doc.isModified():
+            return True
+        ret = QMessageBox.question(
+            self,
+            "Unsaved changes",
+            "შეინახო ცვლილებები?",
+            QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
+            QMessageBox.Yes,
+        )
+        if ret == QMessageBox.Yes:
+            self.save_file()
+            return not self.editor.document().isModified()
+        return ret == QMessageBox.No
 
-# ------------------------------------------------------------------------- #
+
+# ---------------------------------------------------------------------- #
 # Entry point
-# ------------------------------------------------------------------------- #
+# ---------------------------------------------------------------------- #
 def main() -> int:
-    """
-    აპის Entry-point.
-    - Wayland-ზე ვურჩევთ Qt-ს Wayland backend-ს.
-    - ვქმნით QApplication-ს და ვუშვებთ მთავარი ფანჯარას.
-    """
-    # Wayland პრიორიტეტი Linux-ზე (თუ უკვე მითითებული არაა)
     if os.environ.get("XDG_SESSION_TYPE") == "wayland":
         os.environ.setdefault("QT_QPA_PLATFORM", "wayland")
 
